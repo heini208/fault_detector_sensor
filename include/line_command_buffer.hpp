@@ -17,7 +17,7 @@ public:
   void Reset();
 
 private:
-  static constexpr std::size_t kCapacity = 32;
+  static constexpr std::size_t kCapacity = 128;
   char buffer_[kCapacity]{};
   std::size_t length_{0};
 };

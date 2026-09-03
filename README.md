@@ -2,10 +2,10 @@
 
 ESP32 firmware for the hand-mounted BMM150 inspection sensor.
 
-The current firmware is a hardware bring-up foundation. It initializes the
-BMM150 and ST7735 display, boots in `IDLE`, and accepts acknowledged acquisition
-commands over the serial monitor. micro-ROS transport and the ROS acquisition
-service will be added after this local control path is validated on hardware.
+The firmware initializes the BMM150 and ST7735 display, boots in `IDLE`, accepts
+acknowledged acquisition commands over the serial monitor, and maintains a
+micro-ROS UDP connection over Wi-Fi. Measurement publication and the ROS
+acquisition service are the next integration steps.
 
 ## Current hardware configuration
 
@@ -33,7 +33,7 @@ with the ESP32 Arduino Wire mutex and must not be substituted.
 
 1. Install the `PlatformIO IDE` extension in VS Code.
 2. Open this repository folder, not only `src/main.cpp`:
-   `/home/marcel/Projects/fault_detector_sensor`.
+   `/home/marcel/Projects/spot/spot_sensor/fault_detector_sensor`.
 3. Connect the ESP32 over a data-capable USB cable.
 4. Wait for PlatformIO to install the Espressif platform and declared libraries.
 5. Click the checkmark in the VS Code status bar to build.
@@ -73,6 +73,47 @@ While recording, compensated BMM150 values are displayed at 10 Hz. Samples are
 not printed over serial so they cannot interfere with interactive commands. The
 later micro-ROS integration will publish timestamped samples independently from
 this diagnostic command interface.
+
+## Configure Wi-Fi and the micro-ROS Agent
+
+Wi-Fi credentials and the Agent endpoint are stored in ESP32 nonvolatile
+storage and are not committed to this repository. The default Agent endpoint is
+`192.168.178.69:8888`. On first boot, use the serial monitor to enter:
+
+~~~text
+set-wifi <ssid> <password>
+show
+~~~
+
+For an SSID containing spaces, surround the SSID with double quotes:
+
+~~~text
+set-wifi "SSID with spaces" <password>
+~~~
+
+The password may contain spaces. Change the Agent endpoint when necessary with:
+
+~~~text
+set-agent <IPv4-address> <port>
+~~~
+
+Erase the stored Wi-Fi credentials and restore the default Agent endpoint with:
+
+~~~text
+reset-network
+~~~
+
+The password is never printed back by `show`. The firmware reports Wi-Fi and
+Agent connection state changes without emitting a periodic heartbeat. Run the
+host Agent with:
+
+~~~bash
+ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888 -v 6
+~~~
+
+The PlatformIO environment builds micro-ROS for ROS 2 Humble with its Wi-Fi
+transport. The first firmware build takes longer because PlatformIO builds the
+micro-ROS library locally.
 
 ## Run host-side state-machine tests
 

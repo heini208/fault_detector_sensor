@@ -113,6 +113,22 @@ void test_second_character_of_crlf_does_not_submit_empty_command() {
                         static_cast<int>(buffer.Feed('\n')));
 }
 
+void test_command_buffer_accepts_network_configuration_command() {
+  LineCommandBuffer buffer;
+  const char command[] =
+      "set-wifi fault-detector-network a-long-test-password";
+  for (const char character : command) {
+    if (character != '\0') {
+      TEST_ASSERT_EQUAL_INT(static_cast<int>(CommandFeedResult::kPending),
+                            static_cast<int>(buffer.Feed(character)));
+    }
+  }
+
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(CommandFeedResult::kCommandReady),
+                        static_cast<int>(buffer.Feed('\n')));
+  TEST_ASSERT_EQUAL_STRING(command, buffer.command());
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_starts_idle);
@@ -124,5 +140,6 @@ int main(int, char **) {
   RUN_TEST(test_line_feed_submits_command);
   RUN_TEST(test_carriage_return_submits_command);
   RUN_TEST(test_second_character_of_crlf_does_not_submit_empty_command);
+  RUN_TEST(test_command_buffer_accepts_network_configuration_command);
   return UNITY_END();
 }

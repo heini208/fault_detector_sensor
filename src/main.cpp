@@ -7,17 +7,24 @@
 #include <bmm150_defs.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 
 #include "acquisition_state_machine.hpp"
 #include "hardware_config.hpp"
 #include "line_command_buffer.hpp"
+#include "micro_ros_connection.hpp"
+#include "network_configuration.hpp"
 
 namespace {
 
 using fault_detector_sensor::AcquisitionStateMachine;
 using fault_detector_sensor::CommandFeedResult;
 using fault_detector_sensor::LineCommandBuffer;
+using fault_detector_sensor::MicroRosConnection;
+using fault_detector_sensor::MicroRosConnectionState;
+using fault_detector_sensor::NetworkConfiguration;
+using fault_detector_sensor::NetworkConfigurationStore;
 using fault_detector_sensor::ToString;
 namespace hardware = fault_detector_sensor::hardware;
 
@@ -43,6 +50,11 @@ bool magnetometer_ready = false;
 std::uint32_t last_sample_ms = 0;
 
 LineCommandBuffer command_buffer;
+NetworkConfiguration network_configuration;
+NetworkConfigurationStore network_configuration_store;
+MicroRosConnection micro_ros_connection;
+MicroRosConnectionState displayed_network_state =
+    MicroRosConnectionState::kUnconfigured;
 
 MagneticFieldSample ReadMagneticField() {
   magnetometer.read_mag_data();
@@ -68,6 +80,18 @@ void DrawSensorStatus() {
   display.setTextColor(magnetometer_ready ? ST77XX_GREEN : ST77XX_RED);
   display.setTextSize(1);
   display.print(magnetometer_ready ? "BMM150 READY" : "BMM150 ERROR");
+}
+
+void DrawNetworkStatus() {
+  display.fillRect(0, 112, 160, 10, ST77XX_BLACK);
+  display.setCursor(0, 112);
+  display.setTextColor(
+      micro_ros_connection.state() == MicroRosConnectionState::kAgentConnected
+          ? ST77XX_GREEN
+          : ST77XX_YELLOW);
+  display.setTextSize(1);
+  display.print(ToString(micro_ros_connection.state()));
+  displayed_network_state = micro_ros_connection.state();
 }
 
 void DrawSample(const MagneticFieldSample &sample) {
@@ -163,11 +187,121 @@ void Calibrate() {
   display.fillScreen(ST77XX_BLACK);
   DrawState();
   DrawSensorStatus();
+  DrawNetworkStatus();
   PrintAcknowledgement(true, "calibration complete");
 }
 
 void PrintHelp() {
   Serial.println("Commands: start, stop, status, calibrate, help");
+  Serial.println("Network: show, set-wifi <ssid> <password>, "
+                 "set-agent <IPv4> <port>, reset-network");
+}
+
+void PrintNetworkConfiguration() {
+  Serial.print("NETWORK state=");
+  Serial.print(ToString(micro_ros_connection.state()));
+  Serial.print(" ssid=");
+  Serial.print(network_configuration.wifi_ssid.isEmpty()
+                   ? "<not-set>"
+                   : network_configuration.wifi_ssid.c_str());
+  Serial.print(" password=");
+  Serial.print(network_configuration.wifi_password.isEmpty() ? "not-set"
+                                                              : "stored");
+  Serial.print(" agent=");
+  Serial.print(network_configuration.agent_address);
+  Serial.print(':');
+  Serial.print(network_configuration.agent_port);
+  if (micro_ros_connection.state() != MicroRosConnectionState::kUnconfigured) {
+    Serial.print(" local_ip=");
+    Serial.print(micro_ros_connection.local_ip());
+  }
+  Serial.println();
+}
+
+bool ParseArguments(const char *command, const char *command_name,
+                    String &first, String &second) {
+  String arguments(command + std::strlen(command_name));
+  arguments.trim();
+  const int separator = arguments.indexOf(' ');
+  if (separator <= 0) {
+    return false;
+  }
+
+  first = arguments.substring(0, separator);
+  second = arguments.substring(separator + 1);
+  second.trim();
+  return !first.isEmpty() && !second.isEmpty();
+}
+
+bool ParseWifiArguments(const char *command, String &ssid, String &password) {
+  String arguments(command + std::strlen("set-wifi"));
+  arguments.trim();
+  if (!arguments.startsWith("\"")) {
+    return ParseArguments(command, "set-wifi", ssid, password);
+  }
+
+  const int closing_quote = arguments.indexOf('"', 1);
+  if (closing_quote <= 1) {
+    return false;
+  }
+  ssid = arguments.substring(1, closing_quote);
+  password = arguments.substring(closing_quote + 1);
+  password.trim();
+  return !password.isEmpty();
+}
+
+void SetWifiConfiguration(const char *command) {
+  String ssid;
+  String password;
+  if (!ParseWifiArguments(command, ssid, password)) {
+    PrintAcknowledgement(false, "usage: set-wifi <ssid> <password>");
+    return;
+  }
+  if (!network_configuration_store.SaveWifi(
+          ssid, password, network_configuration)) {
+    PrintAcknowledgement(false, "invalid WiFi config or NVS write failed");
+    return;
+  }
+
+  PrintAcknowledgement(true, "WiFi config saved");
+  micro_ros_connection.Reconfigure(network_configuration);
+}
+
+void SetAgentConfiguration(const char *command) {
+  String address;
+  String port_text;
+  if (!ParseArguments(command, "set-agent", address, port_text)) {
+    PrintAcknowledgement(false, "usage: set-agent <IPv4> <port>");
+    return;
+  }
+
+  char *end = nullptr;
+  const unsigned long parsed_port =
+      std::strtoul(port_text.c_str(), &end, 10);
+  if (end == port_text.c_str() || *end != '\0' || parsed_port == 0 ||
+      parsed_port > 65535) {
+    PrintAcknowledgement(false, "agent port must be 1..65535");
+    return;
+  }
+
+  if (!network_configuration_store.SaveAgent(
+          address, static_cast<std::uint16_t>(parsed_port),
+          network_configuration)) {
+    PrintAcknowledgement(false, "invalid agent IPv4 or NVS write failed");
+    return;
+  }
+
+  PrintAcknowledgement(true, "agent config saved");
+  micro_ros_connection.Reconfigure(network_configuration);
+}
+
+void ResetNetworkConfiguration() {
+  if (!network_configuration_store.Reset(network_configuration)) {
+    PrintAcknowledgement(false, "NVS reset failed");
+    return;
+  }
+  micro_ros_connection.Reconfigure(network_configuration);
+  PrintAcknowledgement(true, "network config reset");
 }
 
 void ProcessCommand(const char *command) {
@@ -179,10 +313,19 @@ void ProcessCommand(const char *command) {
     PrintAcknowledgement(magnetometer_ready, magnetometer_ready
                                                  ? "BMM150 ready"
                                                  : "BMM150 unavailable");
+    PrintNetworkConfiguration();
   } else if (strcmp(command, "calibrate") == 0) {
     Calibrate();
   } else if (strcmp(command, "help") == 0) {
     PrintHelp();
+  } else if (strcmp(command, "show") == 0) {
+    PrintNetworkConfiguration();
+  } else if (strncmp(command, "set-wifi ", 9) == 0) {
+    SetWifiConfiguration(command);
+  } else if (strncmp(command, "set-agent ", 10) == 0) {
+    SetAgentConfiguration(command);
+  } else if (strcmp(command, "reset-network") == 0) {
+    ResetNetworkConfiguration();
   } else if (command[0] != '\0') {
     PrintAcknowledgement(false, "unknown command");
   }
@@ -235,6 +378,11 @@ void setup() {
   display.fillScreen(ST77XX_BLACK);
   DrawState();
   DrawSensorStatus();
+  if (!network_configuration_store.Load(network_configuration)) {
+    Serial.println("ERROR detail=network configuration storage unavailable");
+  }
+  micro_ros_connection.Begin(network_configuration);
+  DrawNetworkStatus();
   Serial.println("fault_detector_sensor ready in IDLE");
   PrintHelp();
   Serial.flush();
@@ -242,6 +390,10 @@ void setup() {
 
 void loop() {
   PollSerialCommands();
+  micro_ros_connection.Spin();
+  if (micro_ros_connection.state() != displayed_network_state) {
+    DrawNetworkStatus();
+  }
 
   const std::uint32_t now_ms = millis();
   if (!acquisition.is_recording()) {
