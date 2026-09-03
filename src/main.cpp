@@ -25,7 +25,6 @@ struct MagneticFieldSample {
   std::int16_t x_microtesla;
   std::int16_t y_microtesla;
   std::int16_t z_microtesla;
-  std::uint32_t uptime_us;
 };
 
 struct MagneticFieldOffset {
@@ -51,7 +50,6 @@ MagneticFieldSample ReadMagneticField() {
       static_cast<std::int16_t>(magnetometer.mag_data.x - offset.x_microtesla),
       static_cast<std::int16_t>(magnetometer.mag_data.y - offset.y_microtesla),
       static_cast<std::int16_t>(magnetometer.mag_data.z - offset.z_microtesla),
-      micros(),
   };
 }
 
@@ -62,6 +60,14 @@ void DrawState() {
                                                   : ST77XX_YELLOW);
   display.setTextSize(2);
   display.print(ToString(acquisition.state()));
+}
+
+void DrawSensorStatus() {
+  display.fillRect(0, 100, 160, 10, ST77XX_BLACK);
+  display.setCursor(0, 100);
+  display.setTextColor(magnetometer_ready ? ST77XX_GREEN : ST77XX_RED);
+  display.setTextSize(1);
+  display.print(magnetometer_ready ? "BMM150 READY" : "BMM150 ERROR");
 }
 
 void DrawSample(const MagneticFieldSample &sample) {
@@ -77,17 +83,6 @@ void DrawSample(const MagneticFieldSample &sample) {
   display.println(sample.y_microtesla);
   display.print("Z: ");
   display.println(sample.z_microtesla);
-}
-
-void PrintSample(const MagneticFieldSample &sample) {
-  Serial.print("sample uptime_us=");
-  Serial.print(sample.uptime_us);
-  Serial.print(" x_uT=");
-  Serial.print(sample.x_microtesla);
-  Serial.print(" y_uT=");
-  Serial.print(sample.y_microtesla);
-  Serial.print(" z_uT=");
-  Serial.println(sample.z_microtesla);
 }
 
 void PrintAcknowledgement(bool success, const char *detail) {
@@ -167,6 +162,7 @@ void Calibrate() {
   Serial.println();
   display.fillScreen(ST77XX_BLACK);
   DrawState();
+  DrawSensorStatus();
   PrintAcknowledgement(true, "calibration complete");
 }
 
@@ -210,7 +206,10 @@ void InitializeDisplay() {
   display.setSPISpeed(40000000);
   display.setRotation(1);
   display.fillScreen(ST77XX_BLACK);
-  DrawState();
+  display.setCursor(0, 0);
+  display.setTextColor(ST77XX_CYAN);
+  display.setTextSize(2);
+  display.print("BOOTING");
 }
 
 } // namespace
@@ -233,25 +232,28 @@ void setup() {
     Serial.println("ERROR BMM150 chip ID could not be read");
   }
 
+  display.fillScreen(ST77XX_BLACK);
+  DrawState();
+  DrawSensorStatus();
   Serial.println("fault_detector_sensor ready in IDLE");
   PrintHelp();
+  Serial.flush();
 }
 
 void loop() {
   PollSerialCommands();
 
+  const std::uint32_t now_ms = millis();
   if (!acquisition.is_recording()) {
     delay(1);
     return;
   }
 
-  const std::uint32_t now_ms = millis();
   if (now_ms - last_sample_ms < hardware::kSamplePeriodMs) {
     return;
   }
 
   last_sample_ms = now_ms;
   const auto sample = ReadMagneticField();
-  PrintSample(sample);
   DrawSample(sample);
 }

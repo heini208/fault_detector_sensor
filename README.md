@@ -25,6 +25,10 @@ SCL 22 on a classic ESP32 Dev Module). Change `platformio.ini` if the installed
 board is not compatible with `esp32dev`, and change `include/hardware_config.hpp`
 if the wiring differs.
 
+The BMM150 dependency is pinned to a current upstream revision. The older
+PlatformIO registry release (`1.0.0`) deadlocks inside its I2C read implementation
+with the ESP32 Arduino Wire mutex and must not be substituted.
+
 ## Flash from VS Code
 
 1. Install the `PlatformIO IDE` extension in VS Code.
@@ -39,7 +43,7 @@ if the wiring differs.
    Palette and select the ESP32 serial device. A fixed `upload_port` can also be
    added locally to `platformio.ini`, for example `/dev/ttyUSB0`.
 8. Open the plug icon (PlatformIO Serial Monitor). It is configured for 115200
-   baud.
+   baud, local echo, send-on-enter input, and released ESP32 RTS/DTR reset lines.
 
 Some ESP32 boards require holding the `BOOT` button when upload starts and
 releasing it when the terminal displays `Connecting...`.
@@ -51,7 +55,9 @@ the user needs serial-port group access. On Ubuntu this is commonly the
 ## Hardware bring-up
 
 The firmware starts in `IDLE`, so it does not emit measurement samples until
-requested. The command parser accepts LF, CR, and CRLF line endings. Send:
+requested. The command parser accepts LF, CR, and CRLF line endings. Local echo
+is enabled, and input is buffered until Enter is pressed. Each command also
+produces an `OK` or `ERROR` response. Send:
 
 ```text
 status
@@ -63,14 +69,10 @@ help
 
 During `calibrate`, move the complete sensor mount through a figure-eight for
 10 seconds. Calibration is currently held in RAM and is cleared by rebooting.
-While recording, compensated BMM150 values are displayed and printed at 10 Hz:
-
-```text
-sample uptime_us=1234567 x_uT=12 y_uT=-4 z_uT=31
-```
-
-`uptime_us` is only a local bring-up timestamp. The later micro-ROS integration
-must synchronize the ESP32 clock before populating a ROS source timestamp.
+While recording, compensated BMM150 values are displayed at 10 Hz. Samples are
+not printed over serial so they cannot interfere with interactive commands. The
+later micro-ROS integration will publish timestamped samples independently from
+this diagnostic command interface.
 
 ## Run host-side state-machine tests
 
