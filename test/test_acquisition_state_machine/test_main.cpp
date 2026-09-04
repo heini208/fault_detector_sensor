@@ -2,11 +2,14 @@
 
 #include "acquisition_state_machine.hpp"
 #include "line_command_buffer.hpp"
+#include "magnetic_field_units.hpp"
 
 using fault_detector_sensor::AcquisitionState;
 using fault_detector_sensor::AcquisitionStateMachine;
 using fault_detector_sensor::CommandFeedResult;
 using fault_detector_sensor::LineCommandBuffer;
+using fault_detector_sensor::MicroteslaToTesla;
+using fault_detector_sensor::SplitEpochNanoseconds;
 using fault_detector_sensor::ToString;
 
 void setUp() {}
@@ -129,6 +132,20 @@ void test_command_buffer_accepts_network_configuration_command() {
   TEST_ASSERT_EQUAL_STRING(command, buffer.command());
 }
 
+void test_magnetic_field_units_are_converted_to_tesla() {
+  TEST_ASSERT_FLOAT_WITHIN(1.0e-9F, 44.0e-6F,
+                           static_cast<float>(MicroteslaToTesla(44)));
+  TEST_ASSERT_FLOAT_WITHIN(1.0e-9F, -22.0e-6F,
+                           static_cast<float>(MicroteslaToTesla(-22)));
+}
+
+void test_epoch_nanoseconds_are_split_for_ros_header() {
+  const auto timestamp = SplitEpochNanoseconds(1788435776352449000LL);
+
+  TEST_ASSERT_EQUAL_INT32(1788435776, timestamp.seconds);
+  TEST_ASSERT_EQUAL_UINT32(352449000, timestamp.nanoseconds);
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_starts_idle);
@@ -141,5 +158,7 @@ int main(int, char **) {
   RUN_TEST(test_carriage_return_submits_command);
   RUN_TEST(test_second_character_of_crlf_does_not_submit_empty_command);
   RUN_TEST(test_command_buffer_accepts_network_configuration_command);
+  RUN_TEST(test_magnetic_field_units_are_converted_to_tesla);
+  RUN_TEST(test_epoch_nanoseconds_are_split_for_ros_header);
   return UNITY_END();
 }

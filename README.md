@@ -4,8 +4,9 @@ ESP32 firmware for the hand-mounted BMM150 inspection sensor.
 
 The firmware initializes the BMM150 and ST7735 display, boots in `IDLE`, accepts
 acknowledged acquisition commands over the serial monitor, and maintains a
-micro-ROS UDP connection over Wi-Fi. Measurement publication and the ROS
-acquisition service are the next integration steps.
+rtmicro-ROS UDP connection over Wi-Fi. While `RECORDING`, it publishes timestamped
+magnetic-field measurements. The acknowledged ROS acquisition service is the
+next integration step.
 
 ## Current hardware configuration
 
@@ -69,10 +70,9 @@ help
 
 During `calibrate`, move the complete sensor mount through a figure-eight for
 10 seconds. Calibration is currently held in RAM and is cleared by rebooting.
-While recording, compensated BMM150 values are displayed at 10 Hz. Samples are
-not printed over serial so they cannot interfere with interactive commands. The
-later micro-ROS integration will publish timestamped samples independently from
-this diagnostic command interface.
+While recording, compensated BMM150 values are displayed and published at
+10 Hz. Samples are not printed over serial so they cannot interfere with
+interactive commands.
 
 ## Configure Wi-Fi and the micro-ROS Agent
 
@@ -114,6 +114,21 @@ ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888 -v 6
 The PlatformIO environment builds micro-ROS for ROS 2 Humble with its Wi-Fi
 transport. The first firmware build takes longer because PlatformIO builds the
 micro-ROS library locally.
+
+Once the serial monitor reports `ROS state=READY`, the node publishes
+`sensor_msgs/msg/MagneticField` on
+`/sensors/bmm150_probe/magnetic_field`. Values are converted from microtesla to
+Tesla, timestamps are synchronized from the Agent, the frame is
+`bmm150_probe_probe`, and sensor-data best-effort QoS is used. Publication only
+occurs in `RECORDING`; use the serial `start` and `stop` commands until the ROS
+acquisition service is implemented.
+
+Inspect the stream from a ROS 2 terminal with:
+
+~~~bash
+ros2 topic echo /sensors/bmm150_probe/magnetic_field \
+  sensor_msgs/msg/MagneticField --qos-reliability best_effort
+~~~
 
 ## Run host-side state-machine tests
 

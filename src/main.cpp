@@ -13,6 +13,7 @@
 #include "acquisition_state_machine.hpp"
 #include "hardware_config.hpp"
 #include "line_command_buffer.hpp"
+#include "magnetic_field_publisher.hpp"
 #include "micro_ros_connection.hpp"
 #include "network_configuration.hpp"
 
@@ -21,6 +22,7 @@ namespace {
 using fault_detector_sensor::AcquisitionStateMachine;
 using fault_detector_sensor::CommandFeedResult;
 using fault_detector_sensor::LineCommandBuffer;
+using fault_detector_sensor::MagneticFieldPublisher;
 using fault_detector_sensor::MicroRosConnection;
 using fault_detector_sensor::MicroRosConnectionState;
 using fault_detector_sensor::NetworkConfiguration;
@@ -53,8 +55,10 @@ LineCommandBuffer command_buffer;
 NetworkConfiguration network_configuration;
 NetworkConfigurationStore network_configuration_store;
 MicroRosConnection micro_ros_connection;
+MagneticFieldPublisher magnetic_field_publisher;
 MicroRosConnectionState displayed_network_state =
     MicroRosConnectionState::kUnconfigured;
+std::uint32_t next_ros_entity_attempt_ms = 0;
 
 MagneticFieldSample ReadMagneticField() {
   magnetometer.read_mag_data();
@@ -216,6 +220,41 @@ void PrintNetworkConfiguration() {
     Serial.print(micro_ros_connection.local_ip());
   }
   Serial.println();
+  Serial.print("ROS publisher=");
+  Serial.print(magnetic_field_publisher.ready() ? "ready" : "not-ready");
+  Serial.print(" topic=");
+  Serial.println(fault_detector_sensor::kMagneticFieldTopic);
+}
+
+void MaintainRosPublisher() {
+  if (micro_ros_connection.state() !=
+      MicroRosConnectionState::kAgentConnected) {
+    if (magnetic_field_publisher.ready()) {
+      magnetic_field_publisher.End();
+      Serial.println("ROS state=DISCONNECTED detail=publisher destroyed");
+    }
+    return;
+  }
+
+  if (magnetic_field_publisher.ready()) {
+    return;
+  }
+
+  const std::uint32_t now_ms = millis();
+  if (static_cast<std::int32_t>(now_ms - next_ros_entity_attempt_ms) < 0) {
+    return;
+  }
+  next_ros_entity_attempt_ms = now_ms + hardware::kRosEntityRetryPeriodMs;
+
+  if (magnetic_field_publisher.Begin()) {
+    Serial.print("ROS state=READY topic=");
+    Serial.print(fault_detector_sensor::kMagneticFieldTopic);
+    Serial.print(" frame=");
+    Serial.println(fault_detector_sensor::kMagneticFieldFrame);
+  } else {
+    Serial.print("ROS state=RETRYING detail=");
+    Serial.println(magnetic_field_publisher.last_error());
+  }
 }
 
 bool ParseArguments(const char *command, const char *command_name,
@@ -391,6 +430,7 @@ void setup() {
 void loop() {
   PollSerialCommands();
   micro_ros_connection.Spin();
+  MaintainRosPublisher();
   if (micro_ros_connection.state() != displayed_network_state) {
     DrawNetworkStatus();
   }
@@ -407,5 +447,7 @@ void loop() {
 
   last_sample_ms = now_ms;
   const auto sample = ReadMagneticField();
+  (void)magnetic_field_publisher.Publish(
+      sample.x_microtesla, sample.y_microtesla, sample.z_microtesla);
   DrawSample(sample);
 }
