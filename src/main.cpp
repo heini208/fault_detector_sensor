@@ -13,22 +13,25 @@
 #include "acquisition_state_machine.hpp"
 #include "hardware_config.hpp"
 #include "line_command_buffer.hpp"
-#include "magnetic_field_publisher.hpp"
 #include "micro_ros_connection.hpp"
 #include "network_configuration.hpp"
+#include "sensor_ros_node.hpp"
 
 namespace {
 
 using fault_detector_sensor::AcquisitionStateMachine;
+using fault_detector_sensor::AcquisitionCommandResult;
 using fault_detector_sensor::CommandFeedResult;
 using fault_detector_sensor::LineCommandBuffer;
-using fault_detector_sensor::MagneticFieldPublisher;
 using fault_detector_sensor::MicroRosConnection;
 using fault_detector_sensor::MicroRosConnectionState;
 using fault_detector_sensor::NetworkConfiguration;
 using fault_detector_sensor::NetworkConfigurationStore;
+using fault_detector_sensor::SensorRosNode;
 using fault_detector_sensor::ToString;
 namespace hardware = fault_detector_sensor::hardware;
+
+AcquisitionCommandResult ApplyAcquisitionCommand(bool enabled);
 
 struct MagneticFieldSample {
   std::int16_t x_microtesla;
@@ -55,7 +58,7 @@ LineCommandBuffer command_buffer;
 NetworkConfiguration network_configuration;
 NetworkConfigurationStore network_configuration_store;
 MicroRosConnection micro_ros_connection;
-MagneticFieldPublisher magnetic_field_publisher;
+SensorRosNode sensor_ros_node(ApplyAcquisitionCommand);
 MicroRosConnectionState displayed_network_state =
     MicroRosConnectionState::kUnconfigured;
 std::uint32_t next_ros_entity_attempt_ms = 0;
@@ -121,10 +124,9 @@ void PrintAcknowledgement(bool success, const char *detail) {
   Serial.println(detail);
 }
 
-void SetRecording(bool enabled) {
+AcquisitionCommandResult ApplyAcquisitionCommand(bool enabled) {
   if (enabled && !magnetometer_ready) {
-    PrintAcknowledgement(false, "BMM150 unavailable");
-    return;
+    return {false, "BMM150 unavailable"};
   }
 
   const auto result = acquisition.set_recording(enabled);
@@ -135,6 +137,11 @@ void SetRecording(bool enabled) {
     }
     DrawState();
   }
+  return {result.success, result.detail};
+}
+
+void SetRecording(bool enabled) {
+  const auto result = ApplyAcquisitionCommand(enabled);
   PrintAcknowledgement(result.success, result.detail);
 }
 
@@ -220,23 +227,25 @@ void PrintNetworkConfiguration() {
     Serial.print(micro_ros_connection.local_ip());
   }
   Serial.println();
-  Serial.print("ROS publisher=");
-  Serial.print(magnetic_field_publisher.ready() ? "ready" : "not-ready");
+  Serial.print("ROS node=");
+  Serial.print(sensor_ros_node.ready() ? "ready" : "not-ready");
   Serial.print(" topic=");
-  Serial.println(fault_detector_sensor::kMagneticFieldTopic);
+  Serial.print(fault_detector_sensor::kMagneticFieldTopic);
+  Serial.print(" service=");
+  Serial.println(fault_detector_sensor::kSetAcquisitionService);
 }
 
-void MaintainRosPublisher() {
+void MaintainRosNode() {
   if (micro_ros_connection.state() !=
       MicroRosConnectionState::kAgentConnected) {
-    if (magnetic_field_publisher.ready()) {
-      magnetic_field_publisher.End();
-      Serial.println("ROS state=DISCONNECTED detail=publisher destroyed");
+    if (sensor_ros_node.ready()) {
+      sensor_ros_node.End();
+      Serial.println("ROS state=DISCONNECTED detail=entities destroyed");
     }
     return;
   }
 
-  if (magnetic_field_publisher.ready()) {
+  if (sensor_ros_node.ready()) {
     return;
   }
 
@@ -246,14 +255,14 @@ void MaintainRosPublisher() {
   }
   next_ros_entity_attempt_ms = now_ms + hardware::kRosEntityRetryPeriodMs;
 
-  if (magnetic_field_publisher.Begin()) {
+  if (sensor_ros_node.Begin()) {
     Serial.print("ROS state=READY topic=");
     Serial.print(fault_detector_sensor::kMagneticFieldTopic);
-    Serial.print(" frame=");
-    Serial.println(fault_detector_sensor::kMagneticFieldFrame);
+    Serial.print(" service=");
+    Serial.println(fault_detector_sensor::kSetAcquisitionService);
   } else {
     Serial.print("ROS state=RETRYING detail=");
-    Serial.println(magnetic_field_publisher.last_error());
+    Serial.println(sensor_ros_node.last_error());
   }
 }
 
@@ -430,7 +439,8 @@ void setup() {
 void loop() {
   PollSerialCommands();
   micro_ros_connection.Spin();
-  MaintainRosPublisher();
+  MaintainRosNode();
+  sensor_ros_node.Spin();
   if (micro_ros_connection.state() != displayed_network_state) {
     DrawNetworkStatus();
   }
@@ -447,7 +457,7 @@ void loop() {
 
   last_sample_ms = now_ms;
   const auto sample = ReadMagneticField();
-  (void)magnetic_field_publisher.Publish(
+  (void)sensor_ros_node.Publish(
       sample.x_microtesla, sample.y_microtesla, sample.z_microtesla);
   DrawSample(sample);
 }

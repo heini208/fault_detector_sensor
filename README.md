@@ -113,15 +113,17 @@ ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888 -v 6
 
 The PlatformIO environment builds micro-ROS for ROS 2 Humble with its Wi-Fi
 transport. The first firmware build takes longer because PlatformIO builds the
-micro-ROS library locally.
+micro-ROS library locally. The project-level `microros.meta` raises the topic
+name limit to 96 bytes because the fully qualified acquisition service expands
+to longer DDS request and reply topic names internally.
 
 Once the serial monitor reports `ROS state=READY`, the node publishes
 `sensor_msgs/msg/MagneticField` on
 `/sensors/bmm150_probe/magnetic_field`. Values are converted from microtesla to
 Tesla, timestamps are synchronized from the Agent, the frame is
 `bmm150_probe_probe`, and sensor-data best-effort QoS is used. Publication only
-occurs in `RECORDING`; use the serial `start` and `stop` commands until the ROS
-acquisition service is implemented.
+occurs in `RECORDING`. Either the acknowledged ROS service or the serial
+`start` and `stop` diagnostic commands can change the acquisition state.
 
 Inspect the stream from a ROS 2 terminal with:
 
@@ -129,6 +131,22 @@ Inspect the stream from a ROS 2 terminal with:
 ros2 topic echo /sensors/bmm150_probe/magnetic_field \
   sensor_msgs/msg/MagneticField --qos-reliability best_effort
 ~~~
+
+Acquisition can also be controlled through the acknowledged service while the
+node is connected. Start with:
+
+~~~bash
+ros2 service call \
+  /fault_detector/sensors/bmm150_probe/set_acquisition \
+  fault_detector_msgs/srv/SetSensorAcquisition "{enabled: true}"
+~~~
+
+Stop by sending the same request with `enabled: false`. The response reports
+`success` and a human-readable `detail`. A successful start response means the
+ESP32 entered `RECORDING`; host-side acquisition must still wait for its first
+valid sensor sample before starting the requested measurement-duration timer.
+The micro-ROS executor uses a bounded 5 ms wait on each loop so UDP service
+requests are actively pumped while preserving the 10 Hz sampling schedule.
 
 ## Run host-side state-machine tests
 
