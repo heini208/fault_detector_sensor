@@ -11,6 +11,12 @@
                 "-DRMW_UXRCE_TOPIC_NAME_MAX_LENGTH=96",
                 "-DRMW_UXRCE_TRANSPORT=custom"
             ]
+        },
+        "microxrcedds_client": {
+            "cmake-args": [
+                "-DUCLIENT_HARD_LIVELINESS_CHECK=ON",
+                "-DUCLIENT_HARD_LIVELINESS_CHECK_TIMEOUT=3000"
+            ]
         }
     }
 }

@@ -4,9 +4,9 @@ ESP32 firmware for the hand-mounted BMM150 inspection sensor.
 
 The firmware initializes the BMM150 and ST7735 display, boots in `IDLE`, accepts
 acknowledged acquisition commands over the serial monitor, and maintains a
-rtmicro-ROS UDP connection over Wi-Fi. While `RECORDING`, it publishes timestamped
-magnetic-field measurements. The acknowledged ROS acquisition service is the
-next integration step.
+micro-ROS UDP connection over Wi-Fi. While `RECORDING`, it publishes timestamped
+magnetic-field measurements. Acknowledged ROS start/stop control is available in
+both `IDLE` and `RECORDING`.
 
 ## Current hardware configuration
 
@@ -104,8 +104,8 @@ reset-network
 ~~~
 
 The password is never printed back by `show`. The firmware reports Wi-Fi and
-Agent connection state changes without emitting a periodic heartbeat. Run the
-host Agent with:
+Agent connection state changes without periodic serial output. Run the host
+Agent with:
 
 ~~~bash
 ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888 -v 6
@@ -115,7 +115,10 @@ The PlatformIO environment builds micro-ROS for ROS 2 Humble with its Wi-Fi
 transport. The first firmware build takes longer because PlatformIO builds the
 micro-ROS library locally. The project-level `microros.meta` raises the topic
 name limit to 96 bytes because the fully qualified acquisition service expands
-to longer DDS request and reply topic names internally.
+to longer DDS request and reply topic names internally. It also enables Micro
+XRCE-DDS hard liveliness with a three-second timeout. The Agent can therefore
+probe an inactive client, destroy an unresponsive session, and remove its stale
+ROS entities without an application heartbeat topic.
 
 Once the serial monitor reports `ROS state=READY`, the node publishes
 `sensor_msgs/msg/MagneticField` on
