@@ -118,7 +118,10 @@ name limit to 96 bytes because the fully qualified acquisition service expands
 to longer DDS request and reply topic names internally. It also enables Micro
 XRCE-DDS hard liveliness with a three-second timeout. The Agent can therefore
 probe an inactive client, destroy an unresponsive session, and remove its stale
-ROS entities without an application heartbeat topic.
+ROS entities without an application heartbeat topic. The firmware also pings
+the Agent every second, within that liveliness window, and disables Wi-Fi
+modem sleep to reduce incoming packet latency. This increases Wi-Fi power
+consumption. Three failed Agent checks trigger session recovery.
 
 Once the serial monitor reports `ROS state=READY`, the node publishes
 `sensor_msgs/msg/MagneticField` on

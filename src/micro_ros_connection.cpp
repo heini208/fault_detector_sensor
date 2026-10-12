@@ -8,7 +8,8 @@ namespace fault_detector_sensor {
 namespace {
 
 constexpr std::uint32_t kWifiRetryPeriodMs = 10000;
-constexpr std::uint32_t kAgentPingPeriodMs = 5000;
+// Keep proactive traffic inside the configured 3000 ms hard liveliness window.
+constexpr std::uint32_t kAgentPingPeriodMs = 1000;
 constexpr int kAgentPingTimeoutMs = 200;
 constexpr std::uint8_t kAgentPingAttempts = 3;
 constexpr std::uint8_t kAgentDisconnectThreshold = 3;
@@ -35,6 +36,7 @@ void MicroRosConnection::Begin(
   }
 
   WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
   StartWifiAttempt();
 }
